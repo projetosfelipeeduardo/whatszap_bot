@@ -4,6 +4,7 @@ import type React from "react"
 
 import { createContext, useContext, useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
+import { Sidebar } from "@/components/sidebar"
 
 interface User {
   id: string
@@ -14,52 +15,60 @@ interface User {
 
 interface AuthContextType {
   user: User | null
-  isLoading: boolean
+  loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  refreshUser: () => Promise<void>
+  register: (email: string, password: string, fullName: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({
-  children,
-}: {
-  children: React.ReactNode | ((props: { user: User | null; isLoading: boolean }) => React.ReactNode)
-}) {
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider")
+  }
+  return context
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
 
-  // Páginas públicas que não precisam de autenticação
-  const publicPages = ["/login", "/register", "/forgot-password", "/reset-password"]
-  const isPublicPage = publicPages.includes(pathname)
+  // Rotas públicas que não precisam de autenticação
+  const publicRoutes = ["/login", "/register", "/forgot-password", "/reset-password"]
+  const isPublicRoute = publicRoutes.includes(pathname)
 
-  const refreshUser = async () => {
+  useEffect(() => {
+    checkAuth()
+  }, [])
+
+  const checkAuth = async () => {
     try {
       const response = await fetch("/api/auth/me", {
         credentials: "include",
       })
 
       if (response.ok) {
-        const data = await response.json()
-        setUser(data.user)
+        const userData = await response.json()
+        setUser(userData.user)
       } else {
         setUser(null)
-        // Se não está em página pública, redirecionar para login
-        if (!isPublicPage) {
+        // Se não está autenticado e não está em rota pública, redirecionar
+        if (!isPublicRoute) {
           router.push("/login")
         }
       }
     } catch (error) {
-      console.error("Erro ao verificar autenticação:", error)
+      console.error("Auth check error:", error)
       setUser(null)
-      if (!isPublicPage) {
+      if (!isPublicRoute) {
         router.push("/login")
       }
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
@@ -69,16 +78,41 @@ export function AuthProvider({
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ email, password }),
       credentials: "include",
+      body: JSON.stringify({ email, password }),
     })
 
+    const data = await response.json()
+
     if (!response.ok) {
-      const data = await response.json()
       throw new Error(data.error || "Erro ao fazer login")
     }
 
+    setUser(data.user)
+    router.push("/dashboard")
+  }
+
+  const register = async (email: string, password: string, fullName: string) => {
+    const response = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        email,
+        password,
+        fullName,
+        confirmPassword: password,
+      }),
+    })
+
     const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || "Erro ao criar conta")
+    }
+
     setUser(data.user)
     router.push("/dashboard")
   }
@@ -90,38 +124,33 @@ export function AuthProvider({
         credentials: "include",
       })
     } catch (error) {
-      console.error("Erro ao fazer logout:", error)
+      console.error("Logout error:", error)
     } finally {
       setUser(null)
       router.push("/login")
     }
   }
 
-  useEffect(() => {
-    refreshUser()
-  }, [pathname])
-
-  const contextValue = {
-    user,
-    isLoading,
-    login,
-    logout,
-    refreshUser,
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
-  // Se children é uma função, chama com os props
-  if (typeof children === "function") {
-    return <AuthContext.Provider value={contextValue}>{children({ user, isLoading })}</AuthContext.Provider>
+  // Se usuário está autenticado e não está em rota pública, mostrar layout com sidebar
+  if (user && !isPublicRoute) {
+    return (
+      <AuthContext.Provider value={{ user, loading, login, logout, register }}>
+        <div className="flex h-screen bg-gray-100">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto">{children}</main>
+        </div>
+      </AuthContext.Provider>
+    )
   }
 
-  // Caso contrário, renderiza normalmente
-  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error("useAuth deve ser usado dentro de um AuthProvider")
-  }
-  return context
+  // Se não está autenticado ou está em rota pública, mostrar apenas o conteúdo
+  return <AuthContext.Provider value={{ user, loading, login, logout, register }}>{children}</AuthContext.Provider>
 }

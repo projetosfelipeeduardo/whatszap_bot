@@ -12,7 +12,6 @@ const loginSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log("Tentativa de login para:", body.email)
 
     // Validar dados de entrada
     const validationResult = loginSchema.safeParse(body)
@@ -32,7 +31,6 @@ export async function POST(request: NextRequest) {
         password: true,
         name: true,
         planType: true,
-        planStatus: true,
         isActive: true,
       },
     })
@@ -41,16 +39,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 })
     }
 
+    // Verificar se a conta está ativa
+    if (!user.isActive) {
+      return NextResponse.json({ error: "Conta inativa. Entre em contato com o suporte." }, { status: 401 })
+    }
+
     // Verificar senha
     const isValidPassword = await compare(password, user.password)
 
     if (!isValidPassword) {
       return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 })
-    }
-
-    // Verificar se a conta está ativa
-    if (!user.isActive || user.planStatus === "suspended") {
-      return NextResponse.json({ error: "Conta suspensa ou inativa. Entre em contato com o suporte." }, { status: 403 })
     }
 
     // Gerar JWT token
@@ -63,14 +61,6 @@ export async function POST(request: NextRequest) {
       process.env.JWT_SECRET!,
       { expiresIn: "7d" },
     )
-
-    // Atualizar último login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { updatedAt: new Date() },
-    })
-
-    console.log("Login bem-sucedido para:", user.email)
 
     // Criar resposta
     const response = NextResponse.json({
@@ -95,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error("Erro no login:", error)
+    console.error("Login error:", error)
     return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
   }
 }

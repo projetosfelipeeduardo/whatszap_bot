@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Configurando ambiente de desenvolvimento Frontzap..."
+echo "🚀 Configurando ambiente de desenvolvimento FrontZap..."
 
 # Verificar se Docker está instalado
 if ! command -v docker &> /dev/null; then
@@ -34,19 +34,23 @@ docker-compose -f docker-compose.dev.yml up -d
 echo "⏳ Aguardando serviços ficarem prontos..."
 sleep 10
 
-# Verificar se PostgreSQL está pronto
+# Verificar se PostgreSQL está rodando
 echo "🔍 Verificando PostgreSQL..."
-until docker exec frontzap-postgres pg_isready -U frontzap; do
-    echo "⏳ Aguardando PostgreSQL..."
-    sleep 2
-done
+if docker-compose -f docker-compose.dev.yml exec postgres pg_isready -U frontzap; then
+    echo "✅ PostgreSQL está rodando"
+else
+    echo "❌ Erro ao conectar com PostgreSQL"
+    exit 1
+fi
 
-# Verificar se Redis está pronto
+# Verificar se Redis está rodando
 echo "🔍 Verificando Redis..."
-until docker exec frontzap-redis redis-cli ping; do
-    echo "⏳ Aguardando Redis..."
-    sleep 2
-done
+if docker-compose -f docker-compose.dev.yml exec redis redis-cli ping | grep -q PONG; then
+    echo "✅ Redis está rodando"
+else
+    echo "❌ Erro ao conectar com Redis"
+    exit 1
+fi
 
 # Instalar dependências
 echo "📦 Instalando dependências..."
@@ -60,25 +64,19 @@ npx prisma generate
 echo "🗄️  Executando migrações do banco..."
 npx prisma db push
 
-# Criar usuário administrador
-echo "👤 Criando usuário administrador..."
-docker exec -i frontzap-postgres psql -U frontzap -d frontzap < scripts/create-admin.sql
+# Executar seed (criar admin)
+echo "🌱 Criando usuário administrador..."
+docker-compose -f docker-compose.dev.yml exec postgres psql -U frontzap -d frontzap -f /docker-entrypoint-initdb.d/init-db.sql
 
 echo ""
-echo "✅ Configuração concluída!"
+echo "🎉 Configuração concluída com sucesso!"
 echo ""
-echo "🌐 Serviços disponíveis:"
-echo "   - Aplicação: http://localhost:3000"
-echo "   - Adminer (DB): http://localhost:8080"
-echo "   - PostgreSQL: localhost:5432"
-echo "   - Redis: localhost:6379"
-echo ""
-echo "👤 Credenciais de login:"
-echo "   - Email: admin@frontzap.com"
-echo "   - Senha: admin123"
+echo "📋 Informações importantes:"
+echo "   • PostgreSQL: localhost:5432"
+echo "   • Redis: localhost:6379"
+echo "   • Admin: admin@frontzap.com / admin123"
 echo ""
 echo "🚀 Para iniciar a aplicação:"
 echo "   npm run dev"
 echo ""
-echo "🛑 Para parar os serviços:"
-echo "   docker-compose -f docker-compose.dev.yml down"
+echo "🔗 Acesse: http://localhost:3000"

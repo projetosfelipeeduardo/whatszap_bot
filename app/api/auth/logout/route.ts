@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
       message: "Logout realizado com sucesso",
     })
 
-    // Remover cookie
+    // Limpar cookie
     response.cookies.set("session-token", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error("Erro no logout:", error)
+    console.error("Logout error:", error)
     return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
   }
 }

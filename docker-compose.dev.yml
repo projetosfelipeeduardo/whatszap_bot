@@ -12,7 +12,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts:/docker-entrypoint-initdb.d
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     networks:
       - frontzap-network
 
@@ -25,16 +25,6 @@ services:
       - redis_data:/data
     networks:
       - frontzap-network
-
-  adminer:
-    image: adminer:latest
-    container_name: frontzap-adminer
-    ports:
-      - "8080:8080"
-    networks:
-      - frontzap-network
-    depends_on:
-      - postgres
 
 volumes:
   postgres_data:

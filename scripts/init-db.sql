@@ -16,13 +16,14 @@ CREATE SCHEMA IF NOT EXISTS n8n;
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
     avatar_url TEXT,
     phone VARCHAR(20),
     
     -- Subscription info
     plan_type VARCHAR(50) DEFAULT 'free',
+    plan_status VARCHAR(50) DEFAULT 'active',
     stripe_customer_id VARCHAR(255),
     subscription_status VARCHAR(50) DEFAULT 'inactive',
     subscription_id VARCHAR(255),
@@ -129,6 +130,15 @@ CREATE TABLE IF NOT EXISTS contact_list_memberships (
     list_id UUID NOT NULL REFERENCES contact_lists(id) ON DELETE CASCADE,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(contact_id, list_id)
+);
+
+-- Tags table
+CREATE TABLE IF NOT EXISTS tags (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    color VARCHAR(7) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- =============================================
@@ -486,6 +496,10 @@ CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON analytics_events(c
 -- Daily metrics indexes
 CREATE INDEX IF NOT EXISTS idx_daily_metrics_user_date ON daily_metrics(user_id, date DESC);
 
+-- Tags indexes
+CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_tags_color ON tags(color);
+
 -- =============================================
 -- TRIGGERS FOR AUTOMATIC UPDATES
 -- =============================================
@@ -510,6 +524,7 @@ CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON campaigns FOR EACH R
 CREATE TRIGGER update_subscription_plans_updated_at BEFORE UPDATE ON subscription_plans FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_contact_lists_updated_at BEFORE UPDATE ON contact_lists FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_daily_metrics_updated_at BEFORE UPDATE ON daily_metrics FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_tags_updated_at BEFORE UPDATE ON tags FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================
 -- INITIAL DATA
@@ -523,9 +538,17 @@ INSERT INTO subscription_plans (name, slug, description, price, interval, max_co
 ('Enterprise', 'enterprise', 'Para grandes empresas', 19900, 'month', -1, -1, -1, -1, -1, '["Recursos ilimitados", "Agentes IA personalizados", "Integrações customizadas", "Suporte dedicado", "SLA garantido"]', true, false)
 ON CONFLICT (slug) DO NOTHING;
 
+-- Insert default tags
+INSERT INTO tags (id, name, color, created_at, updated_at) VALUES
+  (gen_random_uuid(), 'Cliente', '#10b981', NOW(), NOW()),
+  (gen_random_uuid(), 'Prospect', '#f59e0b', NOW(), NOW()),
+  (gen_random_uuid(), 'VIP', '#8b5cf6', NOW(), NOW()),
+  (gen_random_uuid(), 'Suporte', '#ef4444', NOW(), NOW())
+ON CONFLICT DO NOTHING;
+
 -- Create admin user (password: admin123)
-INSERT INTO users (email, password_hash, full_name, plan_type, is_active, email_verified) VALUES
-('admin@frontzap.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/VcSAg/9S2', 'Administrador', 'enterprise', true, true)
+INSERT INTO users (id, email, password, full_name, plan_type, plan_status, is_active, email_verified, created_at, updated_at) VALUES
+  (gen_random_uuid(), 'admin@frontzap.com', '$2a$12$LQv3c1yqBw2Lfgd9.8K8Ou8YdVp7qhpAL.jF8w8w8w8w8w8w8w8w8w', 'Administrador', 'premium', 'active', true, true, NOW(), NOW())
 ON CONFLICT (email) DO NOTHING;
 
 -- =============================================
