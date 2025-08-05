@@ -5,6 +5,7 @@ networks:
     external: true
   frontzap-internal:
     driver: bridge
+    internal: false
 
 services:
   # PostgreSQL Database
@@ -16,16 +17,17 @@ services:
       - frontzap-internal
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-frontzap}
-      POSTGRES_USER: ${POSTGRES_USER:-frontzap}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-frontzap} -d ${POSTGRES_DB:-frontzap}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-frontzap}"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 30s
 
   # Redis Cache
@@ -35,11 +37,11 @@ services:
     restart: unless-stopped
     networks:
       - frontzap-internal
-    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "auth", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -47,69 +49,80 @@ services:
 
   # Frontzap Application
   frontzap:
-    image: frontzap:latest
-    build:
+    build: 
       context: .
       dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
     container_name: frontzap-app
     restart: unless-stopped
     networks:
       - traefik
       - frontzap-internal
     environment:
-      # Database
-      DATABASE_URL: postgresql://${POSTGRES_USER:-frontzap}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-frontzap}
+      # Database Configuration
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-frontzap}
       
-      # Supabase
+      # Supabase Configuration
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       
-      # Stripe
+      # Stripe Configuration
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
       
-      # N8N
-      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+      # N8N Configuration
+      N8N_WEBHOOK_URL: https://n8n.${DOMAIN}/webhook
       N8N_API_KEY: ${N8N_API_KEY}
       
-      # Redis
+      # Redis Configuration
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       
-      # App
+      # Application Configuration
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       NEXTAUTH_URL: https://${DOMAIN}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
+      
+      # Security
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - app_logs:/app/logs
+      - app_uploads:/app/uploads
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"
       
-      # HTTP Router
+      # Main application
       - "traefik.http.routers.frontzap.rule=Host(`${DOMAIN}`)"
       - "traefik.http.routers.frontzap.entrypoints=websecure"
       - "traefik.http.routers.frontzap.tls=true"
       - "traefik.http.routers.frontzap.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontzap.loadbalancer.server.port=3000"
       
-      # Security Headers
-      - "traefik.http.routers.frontzap.middlewares=frontzap-headers"
-      - "traefik.http.middlewares.frontzap-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,PATCH"
-      - "traefik.http.middlewares.frontzap-headers.headers.accesscontrolalloworiginlist=https://${DOMAIN}"
-      - "traefik.http.middlewares.frontzap-headers.headers.accesscontrolmaxage=100"
-      - "traefik.http.middlewares.frontzap-headers.headers.addvaryheader=true"
-      - "traefik.http.middlewares.frontzap-headers.headers.referrerpolicy=same-origin"
-      - "traefik.http.middlewares.frontzap-headers.headers.framedeny=true"
-      - "traefik.http.middlewares.frontzap-headers.headers.contenttypenosniff=true"
-      - "traefik.http.middlewares.frontzap-headers.headers.browserxssfilter=true"
+      # Security headers
+      - "traefik.http.routers.frontzap.middlewares=frontzap-headers,frontzap-ratelimit"
+      - "traefik.http.middlewares.frontzap-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.frontzap-headers.headers.customrequestheaders.X-Forwarded-For="
+      - "traefik.http.middlewares.frontzap-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.frontzap-headers.headers.stsincludesubdomains=true"
+      - "traefik.http.middlewares.frontzap-headers.headers.stspreload=true"
+      - "traefik.http.middlewares.frontzap-headers.headers.stsseconds=31536000"
+      
+      # Rate limiting
+      - "traefik.http.middlewares.frontzap-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.frontzap-ratelimit.ratelimit.burst=200"
 
   # N8N Automation Platform
   n8n:
@@ -120,18 +133,39 @@ services:
       - traefik
       - frontzap-internal
     environment:
+      # N8N Configuration
       N8N_BASIC_AUTH_ACTIVE: true
       N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD}
       N8N_HOST: n8n.${DOMAIN}
       N8N_PORT: 5678
       N8N_PROTOCOL: https
+      N8N_EDITOR_BASE_URL: https://n8n.${DOMAIN}
       WEBHOOK_URL: https://n8n.${DOMAIN}
+      
+      # Database
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-frontzap}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-postgres}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_SCHEMA: n8n
+      
+      # General
       GENERIC_TIMEZONE: America/Sao_Paulo
+      N8N_DEFAULT_LOCALE: pt-BR
       N8N_METRICS: true
-      N8N_LOG_LEVEL: info
+      
+      # Security
+      N8N_SECURE_COOKIE: true
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
     volumes:
       - n8n_data:/home/node/.n8n
+      - n8n_files:/files
+    depends_on:
+      postgres:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"
@@ -140,6 +174,8 @@ services:
       - "traefik.http.routers.n8n.tls=true"
       - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
       - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+      - "traefik.http.routers.n8n.middlewares=n8n-auth"
+      - "traefik.http.middlewares.n8n-auth.basicauth.users=${N8N_TRAEFIK_AUTH}"
 
 volumes:
   postgres_data:
@@ -147,4 +183,10 @@ volumes:
   redis_data:
     driver: local
   n8n_data:
+    driver: local
+  n8n_files:
+    driver: local
+  app_logs:
+    driver: local
+  app_uploads:
     driver: local

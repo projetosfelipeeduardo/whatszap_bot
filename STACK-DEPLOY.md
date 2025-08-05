@@ -1,156 +1,277 @@
-# 🚀 Deploy Frontzap Stack - Portainer + Traefik
+# 🚀 Frontzap Stack - Guia de Deploy
 
-Este guia mostra como fazer o deploy do Frontzap usando uma stack no Portainer com Traefik já configurado.
+Este guia explica como fazer o deploy da stack Frontzap usando Docker Compose com Traefik e Portainer já instalados.
 
 ## 📋 Pré-requisitos
 
-- ✅ Docker instalado
-- ✅ Traefik rodando
+- ✅ Docker e Docker Compose instalados
+- ✅ Traefik configurado e funcionando
 - ✅ Portainer instalado
-- ✅ Domínio configurado
+- ✅ Domínio configurado apontando para o servidor
+- ✅ Rede `traefik` criada
 
-## 🔧 Configuração Rápida
+## 🔧 Configuração
 
-### 1. Preparar Arquivos
+### 1. Preparar Ambiente
 
 \`\`\`bash
 # Clone o repositório
 git clone https://github.com/seu-usuario/frontzap.git
 cd frontzap
 
-# Configure as variáveis
+# Copiar arquivo de configuração
 cp .env.stack .env
+\`\`\`
+
+### 2. Configurar Variáveis de Ambiente
+
+Edite o arquivo `.env` com suas configurações:
+
+\`\`\`bash
 nano .env
 \`\`\`
 
-### 2. Configurar Variáveis (.env)
+**Variáveis obrigatórias:**
+- `DOMAIN` - Seu domínio (ex: frontzap.seudominio.com)
+- `POSTGRES_PASSWORD` - Senha do PostgreSQL
+- `REDIS_PASSWORD` - Senha do Redis
+- `NEXTAUTH_SECRET` - Chave secreta para autenticação
+- `JWT_SECRET` - Chave secreta para JWT
 
-\`\`\`env
-# Seu domínio
-DOMAIN=seudominio.com
+**Variáveis opcionais mas recomendadas:**
+- Configurações do Supabase
+- Configurações do Stripe
+- Configurações do N8N
 
-# Senhas seguras
-POSTGRES_PASSWORD=senha_super_segura_postgres
-REDIS_PASSWORD=senha_super_segura_redis
-N8N_PASSWORD=senha_super_segura_n8n
-NEXTAUTH_SECRET=chave_muito_longa_e_segura_nextauth
-
-# Configurações Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sua_chave_publica
-SUPABASE_SERVICE_ROLE_KEY=sua_chave_service_role
-
-# Configurações Stripe
-STRIPE_SECRET_KEY=sk_test_ou_live_sua_chave
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_ou_live_sua_chave
-STRIPE_WEBHOOK_SECRET=whsec_sua_chave_webhook
-\`\`\`
-
-### 3. Deploy Automático
+### 3. Gerar Senhas Seguras
 
 \`\`\`bash
-# Dar permissão e executar
+# Gerar senhas aleatórias
+openssl rand -base64 32  # Para NEXTAUTH_SECRET
+openssl rand -base64 32  # Para JWT_SECRET
+openssl rand -base64 16  # Para POSTGRES_PASSWORD
+openssl rand -base64 16  # Para REDIS_PASSWORD
+\`\`\`
+
+## 🚀 Deploy
+
+### Opção 1: Deploy Automático (Recomendado)
+
+\`\`\`bash
+# Dar permissão de execução
 chmod +x deploy-stack.sh
+
+# Executar deploy
 ./deploy-stack.sh
 \`\`\`
 
-## 🎛️ Deploy via Portainer
+### Opção 2: Deploy Manual
 
-### Opção 1: Via Interface Web
+\`\`\`bash
+# Criar rede se não existir
+docker network create traefik
 
-1. Acesse seu Portainer
-2. Vá em **Stacks** → **Add Stack**
-3. Nome: `frontzap`
-4. Cole o conteúdo do `docker-compose.stack.yml`
-5. Configure as variáveis de ambiente
-6. Clique em **Deploy**
+# Fazer pull das imagens
+docker compose -f docker-compose.stack.yml pull
 
-### Opção 2: Via Git Repository
+# Build da aplicação
+docker compose -f docker-compose.stack.yml build
 
-1. No Portainer, vá em **Stacks** → **Add Stack**
-2. Selecione **Repository**
-3. URL: `https://github.com/seu-usuario/frontzap`
-4. Compose file: `docker-compose.stack.yml`
-5. Environment file: `.env.stack`
-6. **Deploy**
+# Iniciar stack
+docker compose -f docker-compose.stack.yml up -d
+\`\`\`
+
+### Opção 3: Deploy via Portainer
+
+1. Acesse Portainer → **Stacks** → **Add Stack**
+2. Nome: `frontzap`
+3. Cole o conteúdo do `docker-compose.stack.yml`
+4. Configure as variáveis de ambiente
+5. Clique em **Deploy the stack**
 
 ## 🌐 Acessos
 
-Após o deploy:
+Após o deploy bem-sucedido:
 
-- **🏠 Aplicação**: `https://seudominio.com`
-- **🤖 N8N**: `https://n8n.seudominio.com`
+- **Aplicação Principal**: `https://seudominio.com`
+- **N8N (Automações)**: `https://n8n.seudominio.com`
 
-## 🔧 Comandos Úteis
+## 🔍 Verificação
+
+### Verificar Status dos Serviços
 
 \`\`\`bash
+# Ver status
+docker compose -f docker-compose.stack.yml ps
+
 # Ver logs
-docker-compose -f docker-compose.stack.yml logs -f
+docker compose -f docker-compose.stack.yml logs -f
 
-# Parar stack
-docker-compose -f docker-compose.stack.yml down
-
-# Reiniciar serviço específico
-docker-compose -f docker-compose.stack.yml restart frontzap
-
-# Backup
-./backup-stack.sh
-
-# Status dos serviços
-docker-compose -f docker-compose.stack.yml ps
+# Verificar saúde da aplicação
+curl -f https://seudominio.com/api/health
 \`\`\`
 
-## 🛡️ Segurança
-
-A stack inclui:
-
-- ✅ **SSL automático** via Traefik
-- ✅ **Headers de segurança**
-- ✅ **Redes isoladas**
-- ✅ **Health checks**
-- ✅ **Senhas criptografadas**
-
-## 🔄 Backup Automático
-
-Configure backup diário no cron:
+### Verificar Banco de Dados
 
 \`\`\`bash
-# Editar crontab
+# Conectar ao PostgreSQL
+docker compose -f docker-compose.stack.yml exec postgres psql -U postgres -d frontzap
+
+# Listar tabelas
+\dt
+
+# Verificar usuários
+SELECT email, full_name, plan_type FROM users;
+\`\`\`
+
+## 🔄 Backup
+
+### Backup Manual
+
+\`\`\`bash
+# Executar backup
+./backup-stack.sh
+\`\`\`
+
+### Backup Automático
+
+\`\`\`bash
+# Adicionar ao crontab
 crontab -e
 
-# Adicionar linha (backup às 2h da manhã)
+# Adicionar linha para backup diário às 2h
 0 2 * * * /caminho/para/frontzap/backup-stack.sh
+\`\`\`
+
+## 🛠️ Manutenção
+
+### Comandos Úteis
+
+\`\`\`bash
+# Parar stack
+docker compose -f docker-compose.stack.yml down
+
+# Reiniciar stack
+docker compose -f docker-compose.stack.yml restart
+
+# Atualizar aplicação
+git pull
+docker compose -f docker-compose.stack.yml build frontzap
+docker compose -f docker-compose.stack.yml up -d frontzap
+
+# Ver logs específicos
+docker compose -f docker-compose.stack.yml logs -f frontzap
+docker compose -f docker-compose.stack.yml logs -f postgres
+docker compose -f docker-compose.stack.yml logs -f redis
+docker compose -f docker-compose.stack.yml logs -f n8n
+\`\`\`
+
+### Limpeza
+
+\`\`\`bash
+# Remover containers parados
+docker container prune
+
+# Remover imagens não utilizadas
+docker image prune
+
+# Remover volumes não utilizados (CUIDADO!)
+docker volume prune
 \`\`\`
 
 ## 🚨 Troubleshooting
 
-### Problema: Serviço não inicia
+### Problemas Comuns
+
+#### 1. Erro de Rede Traefik
 \`\`\`bash
-# Ver logs específicos
-docker logs frontzap-app
-docker logs frontzap-postgres
+# Verificar se a rede existe
+docker network ls | grep traefik
+
+# Criar se não existir
+docker network create traefik
 \`\`\`
 
-### Problema: SSL não funciona
-- Verifique se o domínio aponta para o servidor
-- Confirme se Traefik está configurado corretamente
-- Aguarde alguns minutos para o certificado ser gerado
-
-### Problema: Banco não conecta
+#### 2. Erro de Permissões
 \`\`\`bash
-# Testar conexão
-docker-compose -f docker-compose.stack.yml exec postgres psql -U frontzap -d frontzap
+# Ajustar permissões
+sudo chown -R $USER:$USER .
+chmod +x *.sh
+\`\`\`
+
+#### 3. Erro de SSL
+- Aguarde alguns minutos para o Let's Encrypt gerar os certificados
+- Verifique se o domínio está apontando corretamente
+- Verifique os logs do Traefik
+
+#### 4. Banco de Dados não Conecta
+\`\`\`bash
+# Verificar logs do PostgreSQL
+docker compose -f docker-compose.stack.yml logs postgres
+
+# Verificar se o banco foi criado
+docker compose -f docker-compose.stack.yml exec postgres psql -U postgres -l
+\`\`\`
+
+#### 5. Aplicação não Responde
+\`\`\`bash
+# Verificar logs da aplicação
+docker compose -f docker-compose.stack.yml logs frontzap
+
+# Verificar se as variáveis estão corretas
+docker compose -f docker-compose.stack.yml exec frontzap env | grep -E "(DATABASE_URL|REDIS_URL)"
 \`\`\`
 
 ## 📊 Monitoramento
 
-Para monitoramento avançado, use a stack de monitoramento:
+### Health Checks
+
+A stack inclui health checks automáticos para todos os serviços:
+
+- **PostgreSQL**: Verifica conexão com o banco
+- **Redis**: Verifica resposta do servidor
+- **Aplicação**: Verifica endpoint `/api/health`
+
+### Logs
 
 \`\`\`bash
-docker-compose -f docker-compose.monitoring.yml up -d
+# Logs em tempo real
+docker compose -f docker-compose.stack.yml logs -f
+
+# Logs específicos
+docker compose -f docker-compose.stack.yml logs -f frontzap
+
+# Logs com timestamp
+docker compose -f docker-compose.stack.yml logs -f -t
 \`\`\`
 
-Isso adiciona:
-- **Prometheus** (métricas)
-- **Grafana** (dashboards)
-- **AlertManager** (alertas)
+## 🔐 Segurança
+
+### Recomendações
+
+1. **Senhas Fortes**: Use senhas complexas para todos os serviços
+2. **Firewall**: Configure firewall para permitir apenas portas necessárias
+3. **Backups**: Configure backups automáticos
+4. **Updates**: Mantenha as imagens atualizadas
+5. **Monitoramento**: Configure alertas para falhas
+
+### Portas Utilizadas
+
+- **80/443**: Traefik (HTTP/HTTPS)
+- **3000**: Aplicação Frontzap (interno)
+- **5432**: PostgreSQL (interno)
+- **6379**: Redis (interno)
+- **5678**: N8N (interno)
+
+## 📞 Suporte
+
+Se encontrar problemas:
+
+1. Verifique os logs dos serviços
+2. Consulte a documentação do Traefik
+3. Verifique as configurações de DNS
+4. Entre em contato com o suporte
+
+---
+
+**Frontzap Stack** - Plataforma completa de automação WhatsApp com IA
