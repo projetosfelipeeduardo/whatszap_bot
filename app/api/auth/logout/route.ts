@@ -1,18 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { AuthService } from "@/lib/auth"
 
 export async function POST(request: NextRequest) {
   try {
-    // Obter token do cookie
-    const token = request.cookies.get("session-token")?.value
-
-    if (token) {
-      // Fazer logout
-      await AuthService.logout(token)
-    }
-
     // Criar resposta
     const response = NextResponse.json({
+      success: true,
       message: "Logout realizado com sucesso",
     })
 
@@ -27,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error("Logout error:", error)
-    return NextResponse.json({ error: "Erro ao fazer logout" }, { status: 500 })
+    console.error("Erro no logout:", error)
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
   }
 }

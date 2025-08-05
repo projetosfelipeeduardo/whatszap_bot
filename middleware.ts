@@ -1,94 +1,55 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { AuthService } from "@/lib/auth"
-
-// Rotas que não precisam de autenticação
-const publicRoutes = [
-  "/login",
-  "/register",
-  "/forgot-password",
-  "/reset-password",
-  "/api/auth/login",
-  "/api/auth/register",
-  "/api/auth/forgot-password",
-  "/api/auth/reset-password",
-  "/api/webhook",
-  "/api/health",
-  "/_next",
-  "/favicon.ico",
-  "/public",
-]
-
-// Rotas que só usuários não autenticados podem acessar
-const authRoutes = ["/login", "/register"]
+import { getCurrentUser } from "@/lib/auth"
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Verificar se é uma rota pública
+  // Rotas públicas que não precisam de autenticação
+  const publicRoutes = ["/login", "/register", "/api/auth/login", "/api/auth/register"]
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route))
 
-  // Verificar se é uma rota de autenticação
-  const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route))
+  // Rotas de API que precisam de autenticação
+  const protectedApiRoutes = ["/api/whatsapp", "/api/contacts", "/api/campaigns", "/api/ai"]
+  const isProtectedApiRoute = protectedApiRoutes.some((route) => pathname.startsWith(route))
 
-  // Obter token do cookie
-  const token = request.cookies.get("session-token")?.value
+  try {
+    const user = await getCurrentUser(request)
 
-  // Se não há token e a rota não é pública, redirecionar para login
-  if (!token && !isPublicRoute) {
-    const loginUrl = new URL("/login", request.url)
-    loginUrl.searchParams.set("redirectTo", pathname)
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // Se há token, validar a sessão
-  if (token) {
-    try {
-      const user = await AuthService.validateSession(token)
-
-      // Se o token é inválido, limpar cookie e redirecionar se necessário
-      if (!user) {
-        const response = isPublicRoute ? NextResponse.next() : NextResponse.redirect(new URL("/login", request.url))
-
-        // Limpar cookie inválido
-        response.cookies.set("session-token", "", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: 0,
-          path: "/",
-        })
-
-        return response
+    // Se não está autenticado e tenta acessar rota protegida
+    if (!user && !isPublicRoute) {
+      if (isProtectedApiRoute) {
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 })
       }
 
-      // Se usuário está autenticado e tenta acessar rota de auth, redirecionar
-      if (isAuthRoute) {
-        return NextResponse.redirect(new URL("/dashboard", request.url))
-      }
+      // Redirecionar para login
+      const loginUrl = new URL("/login", request.url)
+      loginUrl.searchParams.set("redirectTo", pathname)
+      return NextResponse.redirect(loginUrl)
+    }
 
-      // Adicionar informações do usuário aos headers para uso nas APIs
+    // Se está autenticado e tenta acessar rota pública
+    if (user && isPublicRoute && !pathname.startsWith("/api/")) {
+      return NextResponse.redirect(new URL("/dashboard", request.url))
+    }
+
+    // Adicionar headers com informações do usuário para rotas protegidas
+    if (user && !isPublicRoute) {
       const response = NextResponse.next()
-      response.headers.set("x-user-id", user.id)
-      response.headers.set("x-user-email", user.email)
-      response.headers.set("x-user-plan", user.planType || "free")
-
+      response.headers.set("X-User-Id", user.id)
+      response.headers.set("X-User-Plan", user.planType)
       return response
-    } catch (error) {
-      console.error("Middleware auth error:", error)
+    }
+  } catch (error) {
+    console.error("Middleware error:", error)
 
-      // Em caso de erro, limpar cookie e continuar
-      const response = isPublicRoute ? NextResponse.next() : NextResponse.redirect(new URL("/login", request.url))
+    // Em caso de erro, redirecionar para login se não for rota pública
+    if (!isPublicRoute) {
+      if (isProtectedApiRoute) {
+        return NextResponse.json({ error: "Authentication error" }, { status: 401 })
+      }
 
-      response.cookies.set("session-token", "", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 0,
-        path: "/",
-      })
-
-      return response
+      return NextResponse.redirect(new URL("/login", request.url))
     }
   }
 
@@ -96,14 +57,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    "/((?!_next/static|_next/image|favicon.ico|public/).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|public).*)"],
 }

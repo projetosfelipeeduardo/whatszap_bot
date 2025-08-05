@@ -9,10 +9,10 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Plus, Play, Save, MessageSquare, Bot, Timer, Filter, Zap } from "lucide-react"
+import { ArrowLeft, Plus, Play, Save, MessageSquare, Bot, Timer, Filter, Zap, Tag } from "lucide-react"
 import Link from "next/link"
 
-type NodeType = "trigger" | "condition" | "action" | "ai" | "delay"
+type NodeType = "trigger" | "condition" | "action" | "ai" | "delay" | "tag"
 
 type FlowNode = {
   id: string
@@ -60,6 +60,7 @@ export default function ConstrutorFluxoPage() {
     { type: "action" as NodeType, label: "Ação", icon: MessageSquare, color: "bg-green-500" },
     { type: "ai" as NodeType, label: "IA", icon: Bot, color: "bg-purple-500" },
     { type: "delay" as NodeType, label: "Delay", icon: Timer, color: "bg-gray-500" },
+    { type: "tag" as NodeType, label: "Etiqueta", icon: Tag, color: "bg-pink-500" },
   ]
 
   const addNode = useCallback((type: NodeType, position: { x: number; y: number }) => {
@@ -241,6 +242,10 @@ export default function ConstrutorFluxoPage() {
         return config.time ? `Esperar ${config.time} ${config.unit}` : "Novo delay"
       case "ai":
         return config.agent ? `Agente: ${config.agent}` : "Novo agente IA"
+      case "tag":
+        return config.action && config.tags?.length > 0
+          ? `${config.action === "add" ? "Adicionar" : "Remover"}: ${config.tags.join(", ")}`
+          : "Nova etiqueta"
       default:
         return `Novo ${type}`
     }
@@ -699,6 +704,78 @@ export default function ConstrutorFluxoPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+              </>
+            )}
+
+            {selectedNode?.type === "tag" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Ação</label>
+                  <Select
+                    defaultValue={selectedNode?.data.config.action || "add"}
+                    onValueChange={(value) => {
+                      if (selectedNode) {
+                        const newConfig = { ...selectedNode.data.config, action: value }
+                        setSelectedNode({
+                          ...selectedNode,
+                          data: { ...selectedNode.data, config: newConfig },
+                        })
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="add">Adicionar Etiquetas</SelectItem>
+                      <SelectItem value="remove">Remover Etiquetas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Etiquetas</label>
+                  <Input
+                    placeholder="Ex: cliente, vip, interessado (separadas por vírgula)"
+                    defaultValue={selectedNode?.data.config.tags?.join(", ") || ""}
+                    onChange={(e) => {
+                      if (selectedNode) {
+                        const tags = e.target.value
+                          .split(",")
+                          .map((tag) => tag.trim())
+                          .filter((tag) => tag.length > 0)
+                        const newConfig = { ...selectedNode.data.config, tags }
+                        setSelectedNode({
+                          ...selectedNode,
+                          data: { ...selectedNode.data, config: newConfig },
+                        })
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Digite as etiquetas separadas por vírgula</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Aplicar a</label>
+                  <Select
+                    defaultValue={selectedNode?.data.config.target || "contact"}
+                    onValueChange={(value) => {
+                      if (selectedNode) {
+                        const newConfig = { ...selectedNode.data.config, target: value }
+                        setSelectedNode({
+                          ...selectedNode,
+                          data: { ...selectedNode.data, config: newConfig },
+                        })
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contact">Contato</SelectItem>
+                      <SelectItem value="conversation">Conversa</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </>
             )}

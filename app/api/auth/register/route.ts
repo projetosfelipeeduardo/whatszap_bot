@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { AuthService } from "@/lib/auth"
+import { hash } from "bcryptjs"
 import { z } from "zod"
+import { prisma } from "@/lib/prisma"
+import jwt from "jsonwebtoken"
 
 const registerSchema = z
   .object({
@@ -17,39 +19,77 @@ const registerSchema = z
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    console.log("Dados recebidos:", body)
 
     // Validar dados de entrada
-    const { email, password, fullName } = registerSchema.parse(body)
+    const validationResult = registerSchema.safeParse(body)
 
-    // Rate limiting por IP
-    const clientIP = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-
-    const canProceed = await AuthService.checkRateLimit(
-      `register:${clientIP}`,
-      3, // 3 tentativas
-      3600, // em 1 hora
-    )
-
-    if (!canProceed) {
-      return NextResponse.json({ error: "Muitas tentativas de registro. Tente novamente em 1 hora." }, { status: 429 })
+    if (!validationResult.success) {
+      console.log("Erro de validação:", validationResult.error.errors)
+      return NextResponse.json({ error: validationResult.error.errors[0].message }, { status: 400 })
     }
 
-    // Registrar usuário
-    const { user, token } = await AuthService.register(email, password, fullName)
+    const { email, password, fullName } = validationResult.data
 
-    // Criar resposta com dados do usuário
+    // Verificar se o email já existe
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    })
+
+    if (existingUser) {
+      return NextResponse.json({ error: "Este email já está em uso" }, { status: 409 })
+    }
+
+    // Hash da senha
+    const passwordHash = await hash(password, 12)
+    console.log("Hash da senha gerado:", passwordHash ? "✓" : "✗")
+
+    // Criar usuário no banco
+    const user = await prisma.user.create({
+      data: {
+        email: email.toLowerCase().trim(),
+        password: passwordHash,
+        name: fullName.trim(),
+        planType: "free",
+        planStatus: "active",
+        isActive: true,
+        emailVerified: false,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        planType: true,
+        createdAt: true,
+      },
+    })
+
+    console.log("Usuário criado:", user)
+
+    // Gerar JWT token
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        planType: user.planType,
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: "7d" },
+    )
+
+    // Criar resposta
     const response = NextResponse.json({
+      success: true,
+      message: "Conta criada com sucesso",
       user: {
         id: user.id,
         email: user.email,
-        fullName: user.fullName,
+        name: user.name,
         planType: user.planType,
-        avatarUrl: user.avatarUrl,
       },
-      message: "Conta criada com sucesso",
     })
 
-    // Definir cookie seguro com o token de sessão
+    // Definir cookie seguro
     response.cookies.set("session-token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -60,15 +100,13 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error("Register error:", error)
+    console.error("Erro no registro:", error)
 
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
+    // Erro específico do Prisma
+    if (error.code === "P2002") {
+      return NextResponse.json({ error: "Este email já está em uso" }, { status: 409 })
     }
 
-    return NextResponse.json(
-      { error: error.message || "Erro interno do servidor" },
-      { status: error.message.includes("já existe") ? 409 : 500 },
-    )
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
   }
 }

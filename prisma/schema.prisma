@@ -11,8 +11,8 @@ model User {
   id                String   @id @default(cuid())
   email             String   @unique
   password          String
-  fullName          String?  @map("full_name")
-  avatarUrl         String?  @map("avatar_url")
+  name              String?
+  avatar            String?
   planType          String   @default("free") @map("plan_type")
   planStatus        String   @default("active") @map("plan_status")
   stripeCustomerId  String?  @map("stripe_customer_id")
@@ -21,17 +21,20 @@ model User {
   n8nApiKey         String?  @map("n8n_api_key")
   emailVerified     Boolean  @default(false) @map("email_verified")
   emailVerifiedAt   DateTime? @map("email_verified_at")
+  resetToken        String?  @map("reset_token")
+  resetTokenExpiry  DateTime? @map("reset_token_expiry")
+  isActive          Boolean  @default(true) @map("is_active")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   // Relacionamentos
   whatsappConnections WhatsappConnection[]
-  webhooks           Webhook[]
-  campaigns          Campaign[]
-  remarketing        Remarketing[]
-  conversationFlows  ConversationFlow[]
-  contacts           Contact[]
-  sessions           Session[]
+  contacts            Contact[]
+  conversations       Conversation[]
+  conversationFlows   ConversationFlow[]
+  tags                Tag[]
+  aiAgents            AiAgent[]
+  sessions            Session[]
 
   @@map("users")
 }
@@ -42,109 +45,95 @@ model Session {
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
-  
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("sessions")
 }
 
-model Plan {
-  id            String  @id @default(cuid())
-  name          String
-  slug          String  @unique
-  description   String?
-  price         Decimal @db.Decimal(10, 2)
-  interval      String  @default("month")
-  features      Json    @default("[]")
-  stripePriceId String? @map("stripe_price_id")
-  isActive      Boolean @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  @@map("plans")
-}
-
 model WhatsappConnection {
-  id              String   @id @default(cuid())
-  userId          String   @map("user_id")
-  name            String
-  phoneNumber     String?  @map("phone_number")
-  status          String   @default("disconnected")
-  qrCode          String?  @map("qr_code")
-  sessionData     Json?    @map("session_data")
-  n8nWorkflowId   String?  @map("n8n_workflow_id")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(cuid())
+  userId         String    @map("user_id")
+  name           String
+  phoneNumber    String?   @map("phone_number")
+  status         String    @default("disconnected") // connecting, connected, disconnected, qr_required
+  qrCode         String?   @map("qr_code")
+  sessionData    Json?     @map("session_data")
+  lastActivityAt DateTime? @map("last_activity_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Relacionamentos
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts      Contact[]
+  conversations Conversation[]
 
   @@map("whatsapp_connections")
 }
 
-model Webhook {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  name      String
-  url       String
-  status    String   @default("active")
-  events    Json     @default("[]")
-  secretKey String?  @map("secret_key")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model Contact {
+  id                   String    @id @default(cuid())
+  userId               String    @map("user_id")
+  whatsappConnectionId String?   @map("whatsapp_connection_id")
+  phoneNumber          String    @map("phone_number")
+  name                 String?
+  avatar               String?
+  status               String    @default("active") // active, blocked, archived
+  lastInteractionAt    DateTime? @map("last_interaction_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  logs WebhookLog[]
+  // Relacionamentos
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whatsappConnection  WhatsappConnection? @relation(fields: [whatsappConnectionId], references: [id], onDelete: SetNull)
+  conversations       Conversation[]
+  contactTags         ContactTag[]
 
-  @@map("webhooks")
+  @@unique([userId, phoneNumber])
+  @@map("contacts")
 }
 
-model WebhookLog {
-  id              String   @id @default(cuid())
-  webhookId       String   @map("webhook_id")
-  status          String?
-  requestPayload  Json?    @map("request_payload")
-  responsePayload Json?    @map("response_payload")
-  statusCode      Int?     @map("status_code")
-  duration        Int?
-  createdAt       DateTime @default(now()) @map("created_at")
+model Conversation {
+  id                   String    @id @default(cuid())
+  userId               String    @map("user_id")
+  contactId            String    @map("contact_id")
+  whatsappConnectionId String?   @map("whatsapp_connection_id")
+  status               String    @default("open") // open, closed, archived
+  unreadCount          Int       @default(0) @map("unread_count")
+  lastMessageAt        DateTime? @map("last_message_at")
+  aiEnabled            Boolean   @default(false) @map("ai_enabled")
+  aiAgentId            String?   @map("ai_agent_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  // Relacionamentos
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  whatsappConnection WhatsappConnection? @relation(fields: [whatsappConnectionId], references: [id], onDelete: SetNull)
+  aiAgent            AiAgent?            @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  messages           Message[]
 
-  @@map("webhook_logs")
+  @@map("conversations")
 }
 
-model Campaign {
-  id              String   @id @default(cuid())
-  userId          String   @map("user_id")
-  name            String
-  status          String   @default("draft")
-  messageTemplate Json?    @map("message_template")
-  schedule        Json?
-  segment         Json?
-  stats           Json     @default("{\"sent\": 0, \"delivered\": 0, \"read\": 0, \"replied\": 0}")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+model Message {
+  id                 String    @id @default(cuid())
+  conversationId     String    @map("conversation_id")
+  type               String    @default("text") // text, image, audio, video, document
+  content            String
+  direction          String // inbound, outbound
+  status             String    @default("sent") // sent, delivered, read, failed
+  whatsappMessageId  String?   @map("whatsapp_message_id")
+  metadata           Json?
+  sentAt             DateTime? @map("sent_at")
+  deliveredAt        DateTime? @map("delivered_at")
+  readAt             DateTime? @map("read_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Relacionamentos
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@map("campaigns")
-}
-
-model Remarketing {
-  id              String   @id @default(cuid())
-  userId          String   @map("user_id")
-  name            String
-  status          String   @default("active")
-  triggerType     String?  @map("trigger_type")
-  triggerConfig   Json?    @map("trigger_config")
-  messageSequence Json?    @map("message_sequence")
-  stats           Json     @default("{\"triggered\": 0, \"completed\": 0}")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("remarketing")
+  @@map("messages")
 }
 
 model ConversationFlow {
@@ -152,31 +141,64 @@ model ConversationFlow {
   userId      String   @map("user_id")
   name        String
   description String?
-  nodes       Json     @default("[]")
-  edges       Json     @default("[]")
-  isActive    Boolean  @default(false) @map("is_active")
+  flowData    Json     @map("flow_data") // Dados do fluxo (nodes, edges, etc)
+  isActive    Boolean  @default(true) @map("is_active")
+  priority    Int      @default(0)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  // Relacionamentos
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("conversation_flows")
 }
 
-model Contact {
-  id              String    @id @default(cuid())
-  userId          String    @map("user_id")
-  phoneNumber     String    @map("phone_number")
-  fullName        String?   @map("full_name")
-  email           String?
-  tags            Json      @default("[]")
-  customFields    Json      @default("{}") @map("custom_fields")
-  lastInteraction DateTime? @map("last_interaction")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  name      String
+  color     String   @default("#3b82f6")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Relacionamentos
+  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contactTags ContactTag[]
 
-  @@unique([userId, phoneNumber])
-  @@map("contacts")
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  id        String   @id @default(cuid())
+  contactId String   @map("contact_id")
+  tagId     String   @map("tag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@map("contact_tags")
+}
+
+model AiAgent {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  description   String?
+  systemPrompt  String   @map("system_prompt")
+  model         String   @default("gpt-3.5-turbo")
+  temperature   Float    @default(0.7)
+  maxTokens     Int      @default(1000) @map("max_tokens")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@map("ai_agents")
 }

@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { AuthService } from "@/lib/auth"
+import { compare } from "bcryptjs"
 import { z } from "zod"
+import { prisma } from "@/lib/prisma"
+import jwt from "jsonwebtoken"
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido"),
@@ -10,39 +12,79 @@ const loginSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    console.log("Tentativa de login para:", body.email)
 
     // Validar dados de entrada
-    const { email, password } = loginSchema.parse(body)
+    const validationResult = loginSchema.safeParse(body)
 
-    // Rate limiting por IP
-    const clientIP = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-
-    const canProceed = await AuthService.checkRateLimit(
-      `login:${clientIP}`,
-      5, // 5 tentativas
-      300, // em 5 minutos (300 segundos)
-    )
-
-    if (!canProceed) {
-      return NextResponse.json({ error: "Muitas tentativas de login. Tente novamente em 5 minutos." }, { status: 429 })
+    if (!validationResult.success) {
+      return NextResponse.json({ error: validationResult.error.errors[0].message }, { status: 400 })
     }
 
-    // Tentar fazer login
-    const { user, token } = await AuthService.login(email, password)
+    const { email, password } = validationResult.data
 
-    // Criar resposta com dados do usuário
+    // Buscar usuário no banco
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        name: true,
+        planType: true,
+        planStatus: true,
+        isActive: true,
+      },
+    })
+
+    if (!user) {
+      return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 })
+    }
+
+    // Verificar senha
+    const isValidPassword = await compare(password, user.password)
+
+    if (!isValidPassword) {
+      return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 })
+    }
+
+    // Verificar se a conta está ativa
+    if (!user.isActive || user.planStatus === "suspended") {
+      return NextResponse.json({ error: "Conta suspensa ou inativa. Entre em contato com o suporte." }, { status: 403 })
+    }
+
+    // Gerar JWT token
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        planType: user.planType,
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: "7d" },
+    )
+
+    // Atualizar último login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { updatedAt: new Date() },
+    })
+
+    console.log("Login bem-sucedido para:", user.email)
+
+    // Criar resposta
     const response = NextResponse.json({
+      success: true,
+      message: "Login realizado com sucesso",
       user: {
         id: user.id,
         email: user.email,
-        fullName: user.fullName,
+        name: user.name,
         planType: user.planType,
-        avatarUrl: user.avatarUrl,
       },
-      message: "Login realizado com sucesso",
     })
 
-    // Definir cookie seguro com o token de sessão
+    // Definir cookie seguro
     response.cookies.set("session-token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -53,15 +95,7 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error: any) {
-    console.error("Login error:", error)
-
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
-    }
-
-    return NextResponse.json(
-      { error: error.message || "Erro interno do servidor" },
-      { status: error.message === "Credenciais inválidas" ? 401 : 500 },
-    )
+    console.error("Erro no login:", error)
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
   }
 }

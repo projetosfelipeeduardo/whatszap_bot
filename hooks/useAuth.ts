@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import type React from "react"
+
+import { useState, useEffect, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 
 interface User {
@@ -8,194 +10,97 @@ interface User {
   email: string
   fullName: string
   planType: string
-  avatarUrl?: string
 }
 
-interface AuthState {
+interface AuthContextType {
   user: User | null
   isLoading: boolean
-  isAuthenticated: boolean
+  login: (email: string, password: string) => Promise<void>
+  logout: () => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
-export function useAuth() {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    isLoading: true,
-    isAuthenticated: false,
-  })
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
-  // Verificar se o usuário está autenticado
-  const checkAuth = useCallback(async () => {
+  // Verificar usuário atual
+  const refreshUser = async () => {
     try {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include",
-      })
+      const response = await fetch("/api/auth/me")
 
       if (response.ok) {
         const data = await response.json()
-        setAuthState({
-          user: data.user,
-          isLoading: false,
-          isAuthenticated: true,
-        })
+        setUser(data.user)
       } else {
-        setAuthState({
-          user: null,
-          isLoading: false,
-          isAuthenticated: false,
-        })
+        setUser(null)
       }
     } catch (error) {
-      console.error("Auth check error:", error)
-      setAuthState({
-        user: null,
-        isLoading: false,
-        isAuthenticated: false,
-      })
+      console.error("Error fetching user:", error)
+      setUser(null)
+    } finally {
+      setIsLoading(false)
     }
-  }, [])
+  }
 
   // Login
-  const login = useCallback(async (email: string, password: string) => {
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-        credentials: "include",
-      })
+  const login = async (email: string, password: string) => {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    })
 
-      const data = await response.json()
+    const data = await response.json()
 
-      if (response.ok) {
-        setAuthState({
-          user: data.user,
-          isLoading: false,
-          isAuthenticated: true,
-        })
-        return { success: true, user: data.user }
-      } else {
-        return { success: false, error: data.error }
-      }
-    } catch (error) {
-      console.error("Login error:", error)
-      return { success: false, error: "Erro de conexão" }
+    if (!response.ok) {
+      throw new Error(data.error || "Erro ao fazer login")
     }
-  }, [])
+
+    setUser(data.user)
+    router.push("/dashboard")
+  }
 
   // Logout
-  const logout = useCallback(async () => {
+  const logout = async () => {
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      })
+      await fetch("/api/auth/logout", { method: "POST" })
     } catch (error) {
       console.error("Logout error:", error)
     } finally {
-      setAuthState({
-        user: null,
-        isLoading: false,
-        isAuthenticated: false,
-      })
+      setUser(null)
       router.push("/login")
     }
-  }, [router])
+  }
 
-  // Registrar
-  const register = useCallback(async (email: string, password: string, fullName: string, confirmPassword: string) => {
-    try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password, fullName, confirmPassword }),
-        credentials: "include",
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        setAuthState({
-          user: data.user,
-          isLoading: false,
-          isAuthenticated: true,
-        })
-        return { success: true, user: data.user }
-      } else {
-        return { success: false, error: data.error }
-      }
-    } catch (error) {
-      console.error("Register error:", error)
-      return { success: false, error: "Erro de conexão" }
-    }
+  useEffect(() => {
+    refreshUser()
   }, [])
 
-  // Atualizar perfil
-  const updateProfile = useCallback(
-    async (data: {
-      fullName?: string
-      avatarUrl?: string
-      phone?: string
-    }) => {
-      try {
-        const response = await fetch("/api/auth/profile", {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(data),
-          credentials: "include",
-        })
-
-        const result = await response.json()
-
-        if (response.ok) {
-          setAuthState((prev) => ({
-            ...prev,
-            user: result.user,
-          }))
-          return { success: true, user: result.user }
-        } else {
-          return { success: false, error: result.error }
-        }
-      } catch (error) {
-        console.error("Update profile error:", error)
-        return { success: false, error: "Erro de conexão" }
-      }
-    },
-    [],
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        login,
+        logout,
+        refreshUser,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   )
-
-  // Verificar autenticação na inicialização
-  useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
-
-  return {
-    ...authState,
-    login,
-    logout,
-    register,
-    updateProfile,
-    checkAuth,
-  }
 }
 
-// Hook para proteger rotas
-export function useRequireAuth() {
-  const { isAuthenticated, isLoading } = useAuth()
-  const router = useRouter()
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login")
-    }
-  }, [isAuthenticated, isLoading, router])
-
-  return { isAuthenticated, isLoading }
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider")
+  }
+  return context
 }

@@ -2,6 +2,15 @@ import bcrypt from "bcryptjs"
 import { prisma } from "./prisma"
 import { CacheService } from "./redis"
 import crypto from "crypto"
+import jwt from "jsonwebtoken"
+import type { NextRequest } from "next/server"
+
+export interface User {
+  id: string
+  email: string
+  name: string
+  planType: string
+}
 
 export class AuthService {
   static async register(email: string, password: string, fullName?: string) {
@@ -27,10 +36,11 @@ export class AuthService {
       data: {
         email: email.toLowerCase().trim(),
         password: hashedPassword,
-        fullName: fullName?.trim(),
+        name: fullName?.trim(),
         planType: "free",
         planStatus: "active",
         emailVerified: false,
+        isActive: true,
       },
     })
 
@@ -70,8 +80,8 @@ export class AuthService {
     }
 
     // Verificar se a conta está ativa
-    if (user.planStatus === "suspended") {
-      throw new Error("Conta suspensa. Entre em contato com o suporte.")
+    if (user.planStatus === "suspended" || !user.isActive) {
+      throw new Error("Conta suspensa ou inativa. Entre em contato com o suporte.")
     }
 
     // Gerar token de sessão
@@ -313,8 +323,57 @@ export class AuthService {
     return sanitizedUser
   }
 
-  static async getCurrentUser(token: string) {
-    return await this.validateSession(token)
+  static async getCurrentUser(request: NextRequest): Promise<User | null> {
+    try {
+      const token = request.cookies.get("session-token")?.value
+
+      if (!token) {
+        return null
+      }
+
+      // Verificar token JWT
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+        userId: string
+        email: string
+        planType: string
+      }
+
+      // Buscar usuário no banco para garantir que ainda existe e está ativo
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          planType: true,
+          isActive: true,
+        },
+      })
+
+      if (!user || !user.isActive) {
+        return null
+      }
+
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        planType: user.planType,
+      }
+    } catch (error) {
+      console.error("Get current user error:", error)
+      return null
+    }
+  }
+
+  static async requireAuth(request: NextRequest): Promise<User> {
+    const user = await this.getCurrentUser(request)
+
+    if (!user) {
+      throw new Error("Authentication required")
+    }
+
+    return user
   }
 
   static async getUserById(userId: string) {
