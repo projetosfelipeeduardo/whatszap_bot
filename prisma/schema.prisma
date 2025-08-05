@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  password          String
+  fullName          String?  @map("full_name")
+  avatarUrl         String?  @map("avatar_url")
+  planType          String   @default("free") @map("plan_type")
+  planStatus        String   @default("active") @map("plan_status")
+  stripeCustomerId  String?  @map("stripe_customer_id")
+  subscriptionId    String?  @map("subscription_id")
+  n8nUserId         String?  @map("n8n_user_id")
+  n8nApiKey         String?  @map("n8n_api_key")
+  emailVerified     Boolean  @default(false) @map("email_verified")
+  emailVerifiedAt   DateTime? @map("email_verified_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  whatsappConnections WhatsappConnection[]
+  webhooks           Webhook[]
+  campaigns          Campaign[]
+  remarketing        Remarketing[]
+  conversationFlows  ConversationFlow[]
+  contacts           Contact[]
+  sessions           Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+model Plan {
+  id            String  @id @default(cuid())
+  name          String
+  slug          String  @unique
+  description   String?
+  price         Decimal @db.Decimal(10, 2)
+  interval      String  @default("month")
+  features      Json    @default("[]")
+  stripePriceId String? @map("stripe_price_id")
+  isActive      Boolean @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("plans")
+}
+
+model WhatsappConnection {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  name            String
+  phoneNumber     String?  @map("phone_number")
+  status          String   @default("disconnected")
+  qrCode          String?  @map("qr_code")
+  sessionData     Json?    @map("session_data")
+  n8nWorkflowId   String?  @map("n8n_workflow_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_connections")
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  url       String
+  status    String   @default("active")
+  events    Json     @default("[]")
+  secretKey String?  @map("secret_key")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs WebhookLog[]
+
+  @@map("webhooks")
+}
+
+model WebhookLog {
+  id              String   @id @default(cuid())
+  webhookId       String   @map("webhook_id")
+  status          String?
+  requestPayload  Json?    @map("request_payload")
+  responsePayload Json?    @map("response_payload")
+  statusCode      Int?     @map("status_code")
+  duration        Int?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@map("webhook_logs")
+}
+
+model Campaign {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  name            String
+  status          String   @default("draft")
+  messageTemplate Json?    @map("message_template")
+  schedule        Json?
+  segment         Json?
+  stats           Json     @default("{\"sent\": 0, \"delivered\": 0, \"read\": 0, \"replied\": 0}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("campaigns")
+}
+
+model Remarketing {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  name            String
+  status          String   @default("active")
+  triggerType     String?  @map("trigger_type")
+  triggerConfig   Json?    @map("trigger_config")
+  messageSequence Json?    @map("message_sequence")
+  stats           Json     @default("{\"triggered\": 0, \"completed\": 0}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("remarketing")
+}
+
+model ConversationFlow {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?
+  nodes       Json     @default("[]")
+  edges       Json     @default("[]")
+  isActive    Boolean  @default(false) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("conversation_flows")
+}
+
+model Contact {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  phoneNumber     String    @map("phone_number")
+  fullName        String?   @map("full_name")
+  email           String?
+  tags            Json      @default("[]")
+  customFields    Json      @default("{}") @map("custom_fields")
+  lastInteraction DateTime? @map("last_interaction")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, phoneNumber])
+  @@map("contacts")
+}
